@@ -21,8 +21,7 @@ from ryu.ofproto import ofproto_v1_3
 from ryu.lib.packet import packet
 from ryu.lib.packet import ethernet
 from ryu.lib.packet import ether_types
-from ryu.topology import event
-import logging
+
 
 
 class SimpleSwitch13(app_manager.RyuApp):
@@ -31,18 +30,6 @@ class SimpleSwitch13(app_manager.RyuApp):
     def __init__(self, *args, **kwargs):
         super(SimpleSwitch13, self).__init__(*args, **kwargs)
         self.mac_to_port = {}
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
-
-        # create formatter
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-        # add formatter to ch
-        ch.setFormatter(formatter)
-
-        # add ch to logger
-        self.logger.addHandler(ch)
-
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -76,56 +63,6 @@ class SimpleSwitch13(app_manager.RyuApp):
             mod = parser.OFPFlowMod(datapath=datapath, priority=priority,idle_timeout=idle_timeout, hard_timeout=hard_timeout,
                                     match=match, instructions=inst)
         datapath.send_msg(mod)
- 
-
-
-
-
-    @set_ev_cls(event.EventPortAdd)
-    def EventPortAdd(self, event):
-        print('EventPortAdd ',event)  
-
-    @set_ev_cls(event.EventPortDelete)
-    def EventPortDelete(self, event):
-        print('EventPortDelete ',event)  
-
-    @set_ev_cls(event.EventPortModify)
-    def EventPortModify(self, event):
-        print('EventPortModify ',event)  
-
-
-
-    @set_ev_cls(event.EventSwitchReconnected)
-    def EventSwitchReconnected(self, event):
-        print('EventSwitchReconnected ',event)  
-
-    @set_ev_cls(event.EventSwitchEnter)
-    def EventSwitchEnter(self, event):
-        print('EventSwitchEnter ',event)  
-        
-    @set_ev_cls(event.EventSwitchLeave)
-    def EventSwitchLeave(self, event):
-        print('EventSwitchLeave ',event)  
-
-       
-    @set_ev_cls(event.EventHostMove)
-    def EventHostMove(self, event):
-        print('EventHostMove ',event)
-
-    @set_ev_cls(event.EventHostAdd)
-    def EventHostAdd(self, event):
-        print('EventHostAdd ',event) 
-
-    # Event laporan link topo add
-    @set_ev_cls(event.EventLinkAdd)
-    def EventLinkAdd(self, event):
-        print('topo discovery received ',event)
-       
-
-    # Event laporan link topo delete
-    @set_ev_cls(event.EventLinkDelete)
-    def del_link(self, event):
-        print('link discovery timeout')
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
