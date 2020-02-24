@@ -24,6 +24,9 @@ from ryu.lib.packet import ether_types
 from ryu.topology import event
 import logging
 
+from logging.handlers import RotatingFileHandler
+import logging.handlers
+
 
 class SimpleSwitch13(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -31,17 +34,13 @@ class SimpleSwitch13(app_manager.RyuApp):
     def __init__(self, *args, **kwargs):
         super(SimpleSwitch13, self).__init__(*args, **kwargs)
         self.mac_to_port = {}
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(message)s',"%Y-%m-%d %H:%M:%S")
 
-        # create formatter
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-        # add formatter to ch
-        ch.setFormatter(formatter)
-
-        # add ch to logger
-        self.logger.addHandler(ch)
+        logFile = self.name+'.log'
+        my_handler = RotatingFileHandler(logFile, mode='a', maxBytes=100*1024*1024, 
+                                 backupCount=10, encoding=None, delay=0)
+        my_handler.setFormatter(formatter)
+        self.logger.addHandler(my_handler)
 
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
@@ -76,9 +75,21 @@ class SimpleSwitch13(app_manager.RyuApp):
             mod = parser.OFPFlowMod(datapath=datapath, priority=priority,idle_timeout=idle_timeout, hard_timeout=hard_timeout,
                                     match=match, instructions=inst)
         datapath.send_msg(mod)
+
  
 
+    def ports_to_strings(self,out_port,datapath):
 
+        ofproto = datapath.ofproto
+        switcher = { 
+            ofproto.OFPP_FLOOD: "FLOOD", 
+            ofproto.OFPP_IN_PORT: "IN_PORT", 
+            ofproto.OFPP_CONTROLLER: "CONTROLLER", 
+            ofproto.OFPP_LOCAL: "LOCAL", 
+            ofproto.OFPP_ANY: "ANY",
+            ofproto.OFPP_TABLE: "TABLE",
+            }
+        return switcher.get(out_port,str(out_port))
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
@@ -105,7 +116,7 @@ class SimpleSwitch13(app_manager.RyuApp):
         dpid = datapath.id
         self.mac_to_port.setdefault(dpid, {})
 
-        self.logger.info("packet in %s %s %s %s", dpid, src, dst, in_port)
+        self.logger.info("packet-in %s %s %s %s", dpid, src, dst, in_port)
 
         # learn a mac address to avoid FLOOD next time.
         self.mac_to_port[dpid][src] = in_port
@@ -124,13 +135,27 @@ class SimpleSwitch13(app_manager.RyuApp):
             # flow_mod & packet_out
             if msg.buffer_id != ofproto.OFP_NO_BUFFER:
                 self.add_flow(datapath, 1, match, actions, msg.buffer_id)
+                self.logger.info("add-flow %s %s %s %s %s", dpid, src, dst, in_port, self.ports_to_strings(out_port,datapath))
                 return
             else:
                 self.add_flow(datapath, 1, match, actions)
+                self.logger.info("add-flow %s %s %s %s %s", dpid, src, dst, in_port, self.ports_to_strings(out_port,datapath))
         data = None
         if msg.buffer_id == ofproto.OFP_NO_BUFFER:
             data = msg.data
 
+
         out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
                                   in_port=in_port, actions=actions, data=data)
+
+        # switcher = { 
+        #         ofproto.OFPP_FLOOD: "FLOOD", 
+        #         ofproto.OFPP_IN_PORT: "IN_PORT", 
+        #         ofproto.OFPP_CONTROLLER: "CONTROLLER", 
+        #         ofproto.OFPP_LOCAL: "LOCAL", 
+        #         ofproto.OFPP_ANY: "ANY",
+        #         ofproto.OFPP_TABLE: "TABLE",
+        #         } 
+        self.logger.info("packet-out %s %s %s %s %s %s", dpid, str(msg.buffer_id) ,src, dst, in_port, self.ports_to_strings(out_port,datapath))
+        
         datapath.send_msg(out)

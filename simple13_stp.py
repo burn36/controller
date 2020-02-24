@@ -24,6 +24,9 @@ from ryu.lib.packet import packet
 from ryu.lib.packet import ethernet
 from ryu.lib.packet import ether_types
 import simple_switch_13
+from logging.handlers import RotatingFileHandler
+import logging.handlers
+import logging
 
 class SimpleSwitch13(simple_switch_13.SimpleSwitch13):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -49,6 +52,14 @@ class SimpleSwitch13(simple_switch_13.SimpleSwitch13):
                   dpid_lib.str_to_dpid('0000000000000006'):
                   {'bridge': {'priority': 0xd000}}}
         self.stp.set_config(config)
+        formatter = logging.Formatter('%(asctime)s %(message)s',"%Y-%m-%d %H:%M:%S")
+
+        logFile = self.name+'.log'
+        my_handler = RotatingFileHandler(logFile, mode='a', maxBytes=100*1024*1024, 
+                                 backupCount=0, encoding=None, delay=0)
+        my_handler.setFormatter(formatter)
+        self.logger.addHandler(my_handler)
+    
 
     def delete_flow(self, datapath):
         ofproto = datapath.ofproto
@@ -85,7 +96,7 @@ class SimpleSwitch13(simple_switch_13.SimpleSwitch13):
         dpid = datapath.id
         self.mac_to_port.setdefault(dpid, {})
 
-        self.logger.info("packet in %s %s %s %s", dpid, src, dst, in_port)
+        self.logger.info("packet-in %s %s %s %s", dpid, src, dst, in_port)
 
         # learn a mac address to avoid FLOOD next time.
         self.mac_to_port[dpid][src] = in_port
@@ -99,8 +110,9 @@ class SimpleSwitch13(simple_switch_13.SimpleSwitch13):
 
         # install a flow to avoid packet_in next time
         if out_port != ofproto.OFPP_FLOOD:
-            match = parser.OFPMatch(in_port=in_port, eth_dst=dst)
+            match = parser.OFPMatch(in_port=in_port, eth_dst=dst, eth_src=src)
             self.add_flow(datapath, 1, match, actions)
+            self.logger.info("add-flow %s %s %s %s %s", dpid, src, dst, in_port, self.ports_to_strings(out_port,datapath))
 
         data = None
         if msg.buffer_id == ofproto.OFP_NO_BUFFER:
@@ -108,14 +120,34 @@ class SimpleSwitch13(simple_switch_13.SimpleSwitch13):
 
         out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
                                   in_port=in_port, actions=actions, data=data)
+        self.logger.info("packet-out %s %s %s %s %s %s", dpid, self.bufid_to_strings(msg.buffer_id,datapath) ,src, dst, in_port, self.ports_to_strings(out_port,datapath))
         datapath.send_msg(out)
 
+    def bufid_to_strings(self,out_port,datapath):
+
+        ofproto = datapath.ofproto
+        switcher = { 
+            ofproto.OFP_NO_BUFFER: "no buffer"
+            }
+        return switcher.get(out_port,str(out_port))
+    def ports_to_strings(self,out_port,datapath):
+
+        ofproto = datapath.ofproto
+        switcher = { 
+            ofproto.OFPP_FLOOD: "FLOOD", 
+            ofproto.OFPP_IN_PORT: "IN_PORT", 
+            ofproto.OFPP_CONTROLLER: "CONTROLLER", 
+            ofproto.OFPP_LOCAL: "LOCAL", 
+            ofproto.OFPP_ANY: "ANY",
+            ofproto.OFPP_TABLE: "TABLE",
+            }
+        return switcher.get(out_port,str(out_port))
     @set_ev_cls(stplib.EventTopologyChange, MAIN_DISPATCHER)
     def _topology_change_handler(self, ev):
         dp = ev.dp
         dpid_str = dpid_lib.dpid_to_str(dp.id)
         msg = 'Receive topology change event. Flush MAC table.'
-        self.logger.debug("[dpid=%s] %s", dpid_str, msg)
+        self.logger.info("[dpid=%s] %s", dpid_str, msg)
 
         if dp.id in self.mac_to_port:
             self.delete_flow(dp)

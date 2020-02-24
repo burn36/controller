@@ -15,14 +15,16 @@
 
 from ryu.base import app_manager
 from ryu.controller import ofp_event
-from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER
+from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, HANDSHAKE_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.topology import event
-import logging
 import sys
 import logging.handlers
+import logging
+from logging.handlers import RotatingFileHandler
 from ryu.topology import switches,event
-
+import ryu.utils as utils
+from ryu.ofproto import ofproto_parser
 
 class switchLog(app_manager.RyuApp):
 
@@ -32,60 +34,65 @@ class switchLog(app_manager.RyuApp):
                event.EventPortAdd, event.EventPortDelete,
                event.EventPortModify,
                event.EventLinkAdd, event.EventLinkDelete,
-               event.EventHostAdd]
+               event.EventHostAdd,event.EventHostMove]
+
+    @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
+    def _packet_in_handler(self, ev):
+        pass
 
     def __init__(self, *args, **kwargs):
         super(switchLog, self).__init__(*args, **kwargs)
         self.name = 'switchLog'
 
         self.switches = kwargs['switches']
-        self.switches._EVENTS=[]
+        self.switches._EVENTS=self.EVENTS
 
         self.sending_echo_request_interval = 0.05
         ch = logging.StreamHandler()
         ch.setLevel(logging.DEBUG)
 
         # create formatter
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        formatter = logging.Formatter('%(asctime)s %(message)s',"%Y-%m-%d %H:%M:%S")
 
         # add formatter to ch
         ch.setFormatter(formatter)
-
+        logFile = self.name+'.log'
+        my_handler = RotatingFileHandler(logFile, mode='a', maxBytes=5*1024*1024, 
+                                 backupCount=0, encoding=None, delay=0)
+        my_handler.setFormatter(formatter)
         # add ch to logger
         self.logger.addHandler(ch)
 
-        # logname='./'+self.name + '.log'
-        logname=self.name + '.log'
-        # file_name = 'muthu'
-        
-        # self.logger = self.Logger(file_name)
-        # self.logger.basicConfig(filename=logname,
-        #                     filemode='a',
-        #                     format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
-        #                     datefmt='%H:%M:%S',
-        #                     level=logging.INFO)
-        handler=logging.handlers.WatchedFileHandler(logname)
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
+        # logname=self.name + '.log'
+        # handler=logging.handlers.WatchedFileHandler(logname)
+        # handler.setFormatter(formatter)
+        # self.logger.addHandler(handler)
+
+        self.logger.addHandler(my_handler)
     
    
-    
-    def Logger(self,file_name):
-        formatter = logging.Formatter(fmt='%(asctime)s %(module)s,line: %(lineno)d %(levelname)8s | %(message)s',
-                                      datefmt='%Y/%m/%d %H:%M:%S') # %I:%M:%S %p AM|PM format
-        logging.basicConfig(filename = '%s.log' %(file_name),format= '%(asctime)s %(module)s,line: %(lineno)d %(levelname)8s | %(message)s',
-                                      datefmt='%Y/%m/%d %H:%M:%S', filemode = 'w', level = logging.INFO)
-        log_obj = logging.getLogger()
-        log_obj.setLevel(logging.DEBUG)
-        # log_obj = logging.getLogger().addHandler(logging.StreamHandler())
+    @set_ev_cls(ofp_event.EventOFPErrorMsg,[HANDSHAKE_DISPATCHER, CONFIG_DISPATCHER, MAIN_DISPATCHER])
+    def error_msg_handler(self, ev):
+        msg = ev.msg
+        ofp = msg.datapath.ofproto
+        dpid = msg.datapath.id
 
-        # console printer
-        screen_handler = logging.StreamHandler(stream=sys.stdout) #stream=sys.stdout is similar to normal print
-        screen_handler.setFormatter(formatter)
-        logging.getLogger().addHandler(screen_handler)
-
-        log_obj.info("Logger object created successfully..")
-        return log_obj
+        self.logger.info("%s %s %s %s",dpid ,
+            ofp.ofp_msg_type_to_str(msg.msg_type),
+            ofp.ofp_error_type_to_str(msg.type),
+            ofp.ofp_error_code_to_str(msg.type, msg.code))
+        if len(msg.data) >= ofp.OFP_HEADER_SIZE:
+            (version, msg_type, msg_len, xid) = ofproto_parser.header(msg.data)
+            self.logger.info(
+                "%s %s",dpid,
+                ofp.ofp_msg_type_to_str(msg_type))
+        else:
+            self.logger.warning(
+                "The data field sent from the switch is too short: "
+                "len(msg.data) < OFP_HEADER_SIZE\n"
+                "The OpenFlow Spec says that the data field should contain "
+                "at least 64 bytes of the failed request.\n"
+                "Please check the settings or implementation of your switch.")
 
     @set_ev_cls(event.EventPortAdd)
     def EventPortAdd(self, event):
@@ -111,7 +118,6 @@ class switchLog(app_manager.RyuApp):
     def EventSwitchLeave(self, event):
         self.logger.info('EventSwitchLeave %s',event)  
 
-       
     @set_ev_cls(event.EventHostMove)
     def EventHostMove(self, event):
         self.logger.info('EventHostMove %s',event)
@@ -129,6 +135,6 @@ class switchLog(app_manager.RyuApp):
     # Event laporan link topo delete
     @set_ev_cls(event.EventLinkDelete)
     def del_link(self, event):
-        self.logger.info('link discovery timeout')
+        self.logger.info('link discovery timeout %s',event)
 
    
